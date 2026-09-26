@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="el">
+  <head>
+    <meta charset="utf-8" />
+    <title>Coolify Telemetry</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        width: 340px;
+        margin: 0;
+        padding: 14px;
+        background: #111318;
+        color: #eee;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0 0 10px;
+      }
+      .settings {
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .settings.visible {
+        display: flex;
+      }
+      input {
+        background: #1b1e26;
+        border: 1px solid #333;
+        color: #eee;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+      }
+      .row input {
+        flex: 1;
+      }
+      button {
+        background: #1b1e26;
+        border: 1px solid #333;
+        color: #eee;
+        padding: 6px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      button:hover {
+        background: #262a34;
+      }
+      .server {
+        border: 1px solid #2a2d36;
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 8px;
+      }
+      .server-name {
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        margin-bottom: 8px;
+      }
+      .status-ok { color: #30a46c; }
+      .status-bad { color: #e5484d; }
+      .metrics {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+      }
+      .metric-label {
+        font-size: 10px;
+        opacity: 0.6;
+      }
+      .metric-value {
+        font-size: 12px;
+        margin: 2px 0 4px;
+      }
+      .bar {
+        height: 5px;
+        border-radius: 3px;
+        background: rgba(255,255,255,0.08);
+        overflow: hidden;
+      }
+      .bar-fill {
+        height: 100%;
+      }
+      .toolbar {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+      .link-btn {
+        background: none;
+        border: none;
+        color: #7ab8ff;
+        font-size: 11px;
+        cursor: pointer;
+        padding: 0;
+      }
+      #status {
+        font-size: 11px;
+        opacity: 0.6;
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <h1>Coolify Telemetry</h1>
+      <button class="link-btn" id="toggleSettings">Settings</button>
+    </div>
+
+    <div class="settings" id="settings">
+      <input id="dashboardUrl" placeholder="Dashboard URL (π.χ. https://telemetry.example.com)" />
+      <input id="dashboardPassword" type="password" placeholder="Dashboard password (προαιρετικό)" />
+      <button id="saveSettings">Αποθήκευση</button>
+    </div>
+
+    <div id="servers"></div>
+    <div id="status">—</div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

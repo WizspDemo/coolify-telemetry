@@ -1,0 +1,23 @@
+{
+  "name": "coolify-telemetry-agent",
+  "version": "1.0.0",
+  "description": "Small per-server agent that reads Docker container labels and proxies Coolify Sentinel metrics.",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.29",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.9",
+    "typescript": "^5.5.3"
+  }
+}

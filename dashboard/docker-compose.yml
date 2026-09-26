@@ -1,0 +1,12 @@
+services:
+  dashboard:
+    build: .
+    image: ghcr.io/OWNER/coolify-telemetry-dashboard:latest
+    container_name: coolify-telemetry-dashboard
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      SERVERS: ${SERVERS}
+    ports:
+      - "8080"

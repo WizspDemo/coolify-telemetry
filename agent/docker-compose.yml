@@ -1,0 +1,24 @@
+services:
+  telemetry-agent:
+    build: .
+    image: ghcr.io/OWNER/coolify-telemetry-agent:latest
+    container_name: coolify-telemetry-agent
+    restart: unless-stopped
+    environment:
+      PORT: "7777"
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      SERVER_LABEL: ${SERVER_LABEL}
+      SENTINEL_URL: ${SENTINEL_URL:-http://coolify-sentinel:8888}
+      SENTINEL_TOKEN: ${SENTINEL_TOKEN}
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # No published ports needed: Coolify's proxy (Traefik) reaches it over
+    # the shared "coolify" network. Coolify will attach its normal FQDN
+    # label automatically when deployed as an application; see README.
+    networks:
+      - coolify
+
+networks:
+  coolify:
+    external: true
