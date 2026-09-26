@@ -6,7 +6,7 @@ const docker = new Docker({ socketPath: config.dockerSocketPath });
 export interface ManagedContainer {
   /** Docker container ID */
   id: string;
-  /** Container display name as Sentinel records it (name without leading slash) */
+  /** Container display name as Docker records it (name without leading slash) */
   name: string;
   /** Coolify project name, from the coolify.projectName label */
   projectName: string | null;
@@ -19,16 +19,23 @@ export interface ManagedContainer {
   state: string;
   status: string;
   image: string;
+  /** Size of the container's writable layer, in bytes (from `docker ps -s`) */
+  sizeRwBytes: number | null;
+  /** Total size of the container's writable layer + all its data (image + volumes visible to it), in bytes */
+  sizeRootFsBytes: number | null;
 }
 
 /**
  * Lists every container Coolify manages (label coolify.managed=true) on this
  * server, with the project/environment/resource metadata Coolify attaches as
- * Docker labels. This is how we group storage/RAM by "project" without
- * needing Coolify's own database or SSH access.
+ * Docker labels, plus per-container disk usage (equivalent to `docker ps -s`).
+ * This is how we group storage/RAM by "project" without needing Coolify's
+ * own database, Sentinel, or SSH access.
  */
 export async function listManagedContainers(): Promise<ManagedContainer[]> {
-  const containers = await docker.listContainers({ all: true });
+  // `size: true` makes the Docker API compute SizeRw/SizeRootFs per
+  // container - this is what `docker ps -s` uses under the hood.
+  const containers = await docker.listContainers({ all: true, size: true });
 
   return containers
     .filter((c) => c.Labels?.['coolify.managed'] === 'true')
@@ -53,12 +60,13 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
         state: c.State,
         status: c.Status,
         image: c.Image,
+        sizeRwBytes: typeof (c as any).SizeRw === 'number' ? (c as any).SizeRw : null,
+        sizeRootFsBytes: typeof (c as any).SizeRootFs === 'number' ? (c as any).SizeRootFs : null,
       };
     });
 }
 
-/** Live docker stats snapshot (CPU %, memory) for one container, as a fallback
- *  when Sentinel has no recent sample for it yet (e.g. metrics disabled). */
+/** Live docker stats snapshot (CPU %, memory) for one container. */
 export async function getLiveContainerStats(containerId: string) {
   const container = docker.getContainer(containerId);
   const stats = await container.stats({ stream: false });

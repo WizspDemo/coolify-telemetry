@@ -1,14 +1,7 @@
 import express, { NextFunction, Request, Response } from 'express';
 import { config } from './config';
 import { listManagedContainers, getLiveContainerStats } from './docker';
-import {
-  getServerCpuCurrent,
-  getServerMemoryCurrent,
-  getServerDiskCurrent,
-  getContainerMemoryLatest,
-  getContainerCpuLatest,
-  getContainerDiskCurrent,
-} from './sentinel';
+import { getHostCpuPercent, getHostMemory, getHostDisk } from './hostmetrics';
 
 const app = express();
 app.use(express.json());
@@ -34,53 +27,25 @@ app.get('/health', (_req, res) => {
  */
 app.get('/metrics', requireAuth, async (_req, res) => {
   try {
-    const [cpu, memory, disks, containers] = await Promise.all([
-      getServerCpuCurrent(),
-      getServerMemoryCurrent(),
-      getServerDiskCurrent(),
-      listManagedContainers(),
-    ]);
-
-    const rootDisk = disks?.find((d) => d.mount === '/') ?? disks?.[0] ?? null;
+    const cpuPercent = getHostCpuPercent();
+    const memory = getHostMemory();
+    const disk = getHostDisk();
+    const containers = await listManagedContainers();
 
     const perContainer = await Promise.all(
       containers.map(async (c) => {
         let memUsedBytes: number | null = null;
         let memPercent: number | null = null;
-        let cpuPercent: number | null = null;
-        let diskWritableLayerBytes: number | null = null;
-        let diskVolumesBytes: number | null = null;
+        let cpuPct: number | null = null;
 
         if (c.state === 'running') {
-          const [mem, cpuPt, disk] = await Promise.all([
-            getContainerMemoryLatest(c.name),
-            getContainerCpuLatest(c.name),
-            getContainerDiskCurrent(c.name),
-          ]);
-
-          if (mem) {
-            memUsedBytes = mem.used;
-            memPercent = mem.usedPercent;
-          } else {
-            // Sentinel has no sample yet (metrics just enabled, or disabled) -
-            // fall back to a live docker stats snapshot.
-            try {
-              const live = await getLiveContainerStats(c.id);
-              memUsedBytes = live.memoryUsedBytes;
-              memPercent = live.memoryPercent;
-              cpuPercent = cpuPercent ?? live.cpuPercent;
-            } catch {
-              // container may have stopped between listing and stats call
-            }
-          }
-
-          if (cpuPt) {
-            cpuPercent = Number(cpuPt.percent);
-          }
-
-          if (disk) {
-            diskWritableLayerBytes = disk.writableLayer;
-            diskVolumesBytes = disk.volumesTotal;
+          try {
+            const live = await getLiveContainerStats(c.id);
+            memUsedBytes = live.memoryUsedBytes;
+            memPercent = live.memoryPercent;
+            cpuPct = live.cpuPercent;
+          } catch {
+            // container may have stopped between listing and stats call
           }
         }
 
@@ -96,13 +61,9 @@ app.get('/metrics', requireAuth, async (_req, res) => {
           image: c.image,
           memoryUsedBytes: memUsedBytes,
           memoryPercent: memPercent,
-          cpuPercent,
-          diskWritableLayerBytes,
-          diskVolumesBytes,
-          diskTotalBytes:
-            diskWritableLayerBytes !== null && diskVolumesBytes !== null
-              ? diskWritableLayerBytes + diskVolumesBytes
-              : null,
+          cpuPercent: cpuPct,
+          diskWritableLayerBytes: c.sizeRwBytes,
+          diskTotalBytes: c.sizeRootFsBytes,
         };
       })
     );
@@ -127,25 +88,24 @@ app.get('/metrics', requireAuth, async (_req, res) => {
     res.json({
       server: config.serverLabel,
       timestamp: new Date().toISOString(),
-      cpu: cpu ? { percent: cpu.percent } : null,
+      cpu: cpuPercent !== null ? { percent: cpuPercent } : null,
       memory: memory
         ? {
-            totalBytes: memory.total,
-            usedBytes: memory.used,
-            freeBytes: memory.free,
+            totalBytes: memory.totalBytes,
+            usedBytes: memory.usedBytes,
+            freeBytes: memory.freeBytes,
             usedPercent: memory.usedPercent,
           }
         : null,
-      disk: rootDisk
+      disk: disk
         ? {
-            mount: rootDisk.mount,
-            totalBytes: rootDisk.total,
-            usedBytes: rootDisk.used,
-            availableBytes: rootDisk.available,
-            usedPercent: rootDisk.usedPercent,
+            mount: disk.mount,
+            totalBytes: disk.totalBytes,
+            usedBytes: disk.usedBytes,
+            availableBytes: disk.availableBytes,
+            usedPercent: disk.usedPercent,
           }
         : null,
-      allDisks: disks ?? [],
       projects: Array.from(projectMap.values()).sort((a, b) => b.diskBytes - a.diskBytes),
     });
   } catch (err) {

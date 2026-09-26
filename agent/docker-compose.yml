@@ -8,11 +8,13 @@ services:
       PORT: "7777"
       AGENT_TOKEN: ${AGENT_TOKEN}
       SERVER_LABEL: ${SERVER_LABEL}
-      SENTINEL_URL: ${SENTINEL_URL:-http://coolify-sentinel:8888}
-      SENTINEL_TOKEN: ${SENTINEL_TOKEN}
       DOCKER_SOCKET_PATH: /var/run/docker.sock
+      HOST_PROC_PATH: /hostfs/proc
+      HOST_ROOT_PATH: /hostfs/root
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/hostfs/proc:ro
+      - /:/hostfs/root:ro
     # No published ports needed: Coolify's proxy (Traefik) reaches it over
     # the shared "coolify" network. Coolify will attach its normal FQDN
     # label automatically when deployed as an application; see README.
