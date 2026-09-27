@@ -118,7 +118,11 @@ function ModalShell({ onClose, children, width = 340 }: { onClose: () => void; c
       }}
       onClick={onClose}
     >
-      <div onClick={(e) => e.stopPropagation()} className="card" style={{ width, maxHeight: '85vh', overflowY: 'auto' }}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card"
+        style={{ width, maxWidth: '92vw', maxHeight: '85vh', overflowY: 'auto' }}
+      >
         {children}
       </div>
     </div>
@@ -301,7 +305,7 @@ function ServerManagerPanel({ onClose, onChanged }: { onClose: () => void; onCha
   };
 
   return (
-    <ModalShell onClose={onClose} width={460}>
+    <ModalShell onClose={onClose} width={640}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <h2 style={{ margin: 0, fontSize: 17 }}>Coolify servers</h2>
 
@@ -316,18 +320,20 @@ function ServerManagerPanel({ onClose, onChanged }: { onClose: () => void; onCha
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 10,
                 border: '1px solid var(--border)',
                 borderRadius: 8,
-                padding: '8px 10px',
+                padding: '10px 14px',
               }}
             >
-              <div>
+              <div style={{ minWidth: 220 }}>
                 <div style={{ fontSize: 14 }}>{cfg.name}</div>
-                <div className="muted" style={{ fontSize: 12 }}>
+                <div className="muted" style={{ fontSize: 12, wordBreak: 'break-all' }}>
                   {cfg.url} · token {cfg.tokenPreview}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                 <button type="button" className="secondary" onClick={() => startEdit(cfg)}>
                   Επεξεργασία
                 </button>
