@@ -510,16 +510,18 @@ function ProjectRow({
             ⏸ Pause
           </button>
         )}
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy || allRunning}
-          onClick={() => act('start')}
-          style={{ fontSize: 12, padding: '4px 10px' }}
-          title="Εκκίνηση όλων των containers αυτού του project"
-        >
-          ▶ Start
-        </button>
+        {!allRunning && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => act('start')}
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            title="Εκκίνηση όλων των containers αυτού του project"
+          >
+            ▶ Start
+          </button>
+        )}
       </td>
     </tr>
   );
