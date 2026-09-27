@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { randomBytes } from 'crypto';
 
 export interface ServerEntry {
   name: string;
@@ -29,6 +30,17 @@ function parseServers(): ServerEntry[] {
 
 export const config = {
   port: Number(process.env.PORT ?? 8080),
-  dashboardPassword: process.env.DASHBOARD_PASSWORD ?? '',
   servers: parseServers(),
+  // Directory where users.json (accounts) is persisted. Mount this as a
+  // Coolify persistent storage volume so accounts survive redeploys.
+  dataDir: process.env.DATA_DIR ?? '/app/data',
+  // Consulted only once, to create the very first account if none exists
+  // yet. After that, log in and use the UI's "change password" instead.
+  adminUsername: process.env.ADMIN_USERNAME ?? '',
+  adminPassword: process.env.ADMIN_PASSWORD ?? '',
+  // Secret used to sign session tokens (HMAC). Set this explicitly in
+  // production so sessions survive a redeploy; a random one is generated
+  // per-process otherwise (which logs everyone out on every deploy).
+  sessionSecret: process.env.SESSION_SECRET ?? randomBytes(32).toString('hex'),
+  sessionTtlSeconds: Number(process.env.SESSION_TTL_SECONDS ?? 60 * 60 * 24 * 7), // 7 days
 };

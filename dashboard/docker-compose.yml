@@ -6,7 +6,15 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8080"
-      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      DATA_DIR: /app/data
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      SESSION_SECRET: ${SESSION_SECRET}
       SERVERS: ${SERVERS}
+    volumes:
+      - dashboard-data:/app/data
     ports:
       - "8080"
+
+volumes:
+  dashboard-data:

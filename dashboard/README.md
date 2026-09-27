@@ -34,8 +34,13 @@
    αυτό το repo (`dashboard/` folder) και χρησιμοποίησε το `docker-compose.yml`
    εδώ (ή `Dockerfile` απευθείας ως app type "Dockerfile").
 2. Environment variables:
-   - `DASHBOARD_PASSWORD` — προαιρετικό. Βάλε ένα password αν το dashboard
-     θα είναι δημόσια προσβάσιμο. Άδειο = χωρίς login.
+   - `ADMIN_USERNAME` / `ADMIN_PASSWORD` — used **once**, to create your
+     first account when the app boots with no accounts yet. Log in with
+     these, then use the "Αλλαγή password" button in the UI to set your
+     own - the env vars are never consulted again after that.
+   - `SESSION_SECRET` — a long random string (e.g. `openssl rand -hex 32`).
+     Keeps you logged in across redeploys; if left empty a random one is
+     generated per process start (fine, but logs everyone out on redeploy).
    - `SERVERS` — JSON array, ένα entry ανά agent που έστησες:
      ```json
      [
@@ -44,7 +49,10 @@
        {"name":"Server 3","url":"https://telemetry-3.example.com","token":"AGENT_TOKEN_TOU_SERVER_3"}
      ]
      ```
-3. Deploy, βάλε domain, άνοιξέ το.
+3. **Persistent storage**: πρόσθεσε ένα volume mount `/app/data` (Coolify UI
+   → Storages, ή μέσω API `type:"persistent"`), αλλιώς ο λογαριασμός σου
+   χάνεται σε κάθε redeploy.
+4. Deploy, βάλε domain, άνοιξέ το.
 
 ## Τοπική ανάπτυξη
 

@@ -11,7 +11,6 @@ export interface ResourceMetric {
   memoryPercent: number | null;
   cpuPercent: number | null;
   diskWritableLayerBytes: number | null;
-  diskVolumesBytes: number | null;
   diskTotalBytes: number | null;
 }
 
@@ -28,7 +27,6 @@ export interface AgentMetricsResponse {
   cpu: { percent: number } | null;
   memory: { totalBytes: number; usedBytes: number; freeBytes: number; usedPercent: number } | null;
   disk: { mount: string; totalBytes: number; usedBytes: number; availableBytes: number; usedPercent: number } | null;
-  allDisks: Array<{ mount: string; totalBytes: number; usedBytes: number; usedPercent: number }>;
   projects: ProjectMetric[];
 }
 
