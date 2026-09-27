@@ -529,12 +529,29 @@ function ProjectRow({
 
 function ServerCard({ result, onPowerChanged }: { result: ServersApiResponse['servers'][number]; onPowerChanged: () => void }) {
   const { serverId, configuredName, ok, error, data } = result;
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>{configuredName}</h2>
-        <span style={{ fontSize: 12, color: ok ? 'var(--success)' : 'var(--danger)' }}>{ok ? '● online' : '● offline'}</span>
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', gap: 16, flexWrap: 'wrap' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 12, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s ease', display: 'inline-block' }}>
+            ▶
+          </span>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{configuredName}</h2>
+          <span style={{ fontSize: 12, color: ok ? 'var(--success)' : 'var(--danger)' }}>{ok ? '● online' : '● offline'}</span>
+        </div>
+
+        {ok && data && (
+          <div style={{ display: 'flex', gap: 20, fontSize: 13 }} className="muted">
+            <span>CPU {formatPercent(data.cpu?.percent)}</span>
+            <span>RAM {formatPercent(data.memory?.usedPercent)}</span>
+            <span>Disk {formatPercent(data.disk?.usedPercent)}</span>
+          </div>
+        )}
       </div>
 
       {!ok && (
@@ -543,7 +560,7 @@ function ServerCard({ result, onPowerChanged }: { result: ServersApiResponse['se
         </p>
       )}
 
-      {ok && data && (
+      {ok && data && expanded && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginTop: 16 }}>
             <Metric label="CPU" value={formatPercent(data.cpu?.percent)} percent={data.cpu?.percent ?? null} />
