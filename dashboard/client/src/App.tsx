@@ -450,7 +450,7 @@ function ProjectRow({
 
   const runningCount = project.resources.filter((r) => r.state === 'running').length;
   const allRunning = runningCount === project.resources.length && project.resources.length > 0;
-  const allStopped = runningCount === 0;
+  const allStopped = runningCount === 0 && project.resources.length > 0;
 
   const act = async (action: 'start' | 'stop') => {
     setBusy(true);
@@ -474,9 +474,20 @@ function ProjectRow({
   };
 
   return (
-    <tr style={{ borderTop: '1px solid var(--border)' }}>
+    <tr
+      style={{
+        borderTop: '1px solid var(--border)',
+        color: project.hasProblem ? 'var(--danger)' : allStopped ? 'var(--warning)' : undefined,
+      }}
+    >
       <td style={{ padding: '6px 0' }}>
         {project.projectName}
+        {project.hasProblem && (
+          <span style={{ fontSize: 11, marginLeft: 6 }} title={project.resources.find((r) => r.problem)?.problemReason ?? undefined}>
+            ⚠ πρόβλημα
+          </span>
+        )}
+        {!project.hasProblem && allStopped && <span style={{ fontSize: 11, marginLeft: 6 }}>⏸ paused</span>}
         {actionError && (
           <div className="error-text" style={{ fontSize: 11 }}>
             {actionError}
@@ -487,16 +498,18 @@ function ProjectRow({
       <td style={{ padding: '6px 0' }}>{formatBytes(project.diskBytes)}</td>
       <td style={{ padding: '6px 0' }}>{project.resources.length}</td>
       <td style={{ padding: '6px 0', textAlign: 'right' }}>
-        <button
-          type="button"
-          className="secondary"
-          disabled={busy || allStopped}
-          onClick={() => act('stop')}
-          style={{ fontSize: 12, padding: '4px 10px', marginRight: 6 }}
-          title="Σταμάτημα όλων των containers αυτού του project"
-        >
-          ⏸ Pause
-        </button>
+        {!allStopped && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => act('stop')}
+            style={{ fontSize: 12, padding: '4px 10px', marginRight: 6 }}
+            title="Σταμάτημα όλων των containers αυτού του project"
+          >
+            ⏸ Pause
+          </button>
+        )}
         <button
           type="button"
           className="secondary"
@@ -570,6 +583,23 @@ function ServerCard({ result, onPowerChanged }: { result: ServersApiResponse['se
               ))}
             </tbody>
           </table>
+
+          {data.links.length > 0 && (
+            <>
+              <h3 className="muted" style={{ fontSize: 14, marginTop: 24, marginBottom: 8 }}>
+                Συνδέσεις μεταξύ projects
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {data.links.map((link, i) => (
+                  <div key={i} style={{ fontSize: 13 }}>
+                    <strong>{link.fromProject}</strong> ({link.fromContainer}) → <strong>{link.toProject}</strong> (
+                    {link.toContainer})
+                    <span className="muted"> · μέσω {link.viaHostname}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

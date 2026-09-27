@@ -12,13 +12,24 @@ export interface ResourceMetric {
   cpuPercent: number | null;
   diskWritableLayerBytes: number | null;
   diskTotalBytes: number | null;
+  problem: boolean;
+  problemReason: string | null;
 }
 
 export interface ProjectMetric {
   projectName: string;
   memoryUsedBytes: number;
   diskBytes: number;
+  hasProblem: boolean;
   resources: ResourceMetric[];
+}
+
+export interface ProjectLink {
+  fromProject: string;
+  fromContainer: string;
+  toProject: string;
+  toContainer: string;
+  viaHostname: string;
 }
 
 export interface AgentMetricsResponse {
@@ -28,6 +39,7 @@ export interface AgentMetricsResponse {
   memory: { totalBytes: number; usedBytes: number; freeBytes: number; usedPercent: number } | null;
   disk: { mount: string; totalBytes: number; usedBytes: number; availableBytes: number; usedPercent: number } | null;
   projects: ProjectMetric[];
+  links: ProjectLink[];
 }
 
 export interface ServerResult {

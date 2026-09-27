@@ -23,6 +23,39 @@ export interface ManagedContainer {
   sizeRwBytes: number | null;
   /** Total size of the container's writable layer + all its data (image + volumes visible to it), in bytes */
   sizeRootFsBytes: number | null;
+  /** Hostnames other containers on the same docker network(s) could reach this one by. */
+  networkAliases: string[];
+  /** True when this container looks crashed/unhealthy rather than intentionally stopped. */
+  problem: boolean;
+  /** Human-readable reason when problem is true (e.g. "restarting (crash loop)"). */
+  problemReason: string | null;
+}
+
+/**
+ * Flags containers that look broken rather than intentionally stopped, purely
+ * from the state/status strings Docker already reports (no extra inspect
+ * calls needed). Exit codes 0/137/143 are treated as a normal stop (SIGTERM/
+ * SIGKILL from a user-triggered `docker stop`, or a clean exit) so the
+ * dashboard's "Pause project" feature doesn't get flagged as a problem.
+ */
+function computeProblem(state: string, status: string): { problem: boolean; reason: string | null } {
+  if (/\(unhealthy\)/i.test(status)) {
+    return { problem: true, reason: 'unhealthy healthcheck' };
+  }
+  if (state === 'restarting') {
+    return { problem: true, reason: 'restarting repeatedly (crash loop)' };
+  }
+  if (state === 'dead') {
+    return { problem: true, reason: 'dead' };
+  }
+  if (state === 'exited') {
+    const match = status.match(/Exited \((\d+)\)/);
+    const code = match ? Number(match[1]) : 0;
+    if (![0, 137, 143].includes(code)) {
+      return { problem: true, reason: `exited with code ${code}` };
+    }
+  }
+  return { problem: false, reason: null };
 }
 
 /**
@@ -50,6 +83,18 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
       } else if (labels['coolify.serviceId']) {
         type = 'service';
       }
+
+      const networks = (c as any).NetworkSettings?.Networks ?? {};
+      const aliasSet = new Set<string>();
+      for (const netName of Object.keys(networks)) {
+        for (const alias of networks[netName]?.Aliases ?? []) {
+          aliasSet.add(alias);
+        }
+      }
+      aliasSet.add(name);
+
+      const { problem, reason } = computeProblem(c.State, c.Status);
+
       return {
         id: c.Id,
         name,
@@ -62,8 +107,78 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
         image: c.Image,
         sizeRwBytes: typeof (c as any).SizeRw === 'number' ? (c as any).SizeRw : null,
         sizeRootFsBytes: typeof (c as any).SizeRootFs === 'number' ? (c as any).SizeRootFs : null,
+        networkAliases: Array.from(aliasSet),
+        problem,
+        problemReason: reason,
       };
     });
+}
+
+export interface ProjectLink {
+  fromProject: string;
+  fromContainer: string;
+  toProject: string;
+  toContainer: string;
+  /** The hostname/alias found in an env var that pointed at the other container. */
+  viaHostname: string;
+}
+
+/**
+ * Finds cross-project dependencies by inspecting each running container's
+ * environment variables for a hostname that matches another managed
+ * container's network alias (e.g. a DATABASE_URL/SUPABASE_URL pointing at
+ * `supabase-db` from a completely different project). This is how e.g. "which
+ * project actually uses the shared Supabase" gets surfaced without having to
+ * remember it - no extra infra, just reading what's already in the env.
+ */
+export async function detectProjectLinks(containers: ManagedContainer[]): Promise<ProjectLink[]> {
+  const aliasToContainer = new Map<string, ManagedContainer>();
+  for (const c of containers) {
+    for (const alias of c.networkAliases) {
+      if (alias.length < 4) continue; // too short, too likely to false-positive match
+      aliasToContainer.set(alias.toLowerCase(), c);
+    }
+  }
+
+  const links: ProjectLink[] = [];
+  const seenPairs = new Set<string>();
+
+  for (const c of containers) {
+    if (c.state !== 'running') continue;
+    let envLines: string[] = [];
+    try {
+      const info = await docker.getContainer(c.id).inspect();
+      envLines = info.Config?.Env ?? [];
+    } catch {
+      continue; // container may have stopped between listing and inspect
+    }
+
+    for (const [alias, target] of aliasToContainer) {
+      if (target.id === c.id) continue;
+      if ((c.projectName ?? '') === (target.projectName ?? '')) continue; // only cross-project links are interesting
+
+      const matched = envLines.some((line) => {
+        const eqIdx = line.indexOf('=');
+        const value = (eqIdx >= 0 ? line.slice(eqIdx + 1) : line).toLowerCase();
+        return value.includes(alias);
+      });
+      if (!matched) continue;
+
+      const key = `${c.projectName}|${target.projectName}|${alias}`;
+      if (seenPairs.has(key)) continue;
+      seenPairs.add(key);
+
+      links.push({
+        fromProject: c.projectName ?? '(unlabeled)',
+        fromContainer: c.name,
+        toProject: target.projectName ?? '(unlabeled)',
+        toContainer: target.name,
+        viaHostname: alias,
+      });
+    }
+  }
+
+  return links;
 }
 
 /** Live docker stats snapshot (CPU %, memory) for one container. */

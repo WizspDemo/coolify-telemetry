@@ -1,6 +1,6 @@
 import express, { NextFunction, Request, Response } from 'express';
 import { config } from './config';
-import { listManagedContainers, getLiveContainerStats, setContainersPowerForProject } from './docker';
+import { listManagedContainers, getLiveContainerStats, setContainersPowerForProject, detectProjectLinks } from './docker';
 import { getHostCpuPercent, getHostMemory, getHostDisk } from './hostmetrics';
 
 const app = express();
@@ -64,6 +64,8 @@ app.get('/metrics', requireAuth, async (_req, res) => {
           cpuPercent: cpuPct,
           diskWritableLayerBytes: c.sizeRwBytes,
           diskTotalBytes: c.sizeRootFsBytes,
+          problem: c.problem,
+          problemReason: c.problemReason,
         };
       })
     );
@@ -71,19 +73,22 @@ app.get('/metrics', requireAuth, async (_req, res) => {
     // Group per Coolify project
     const projectMap = new Map<
       string,
-      { projectName: string; memoryUsedBytes: number; diskBytes: number; resources: typeof perContainer }
+      { projectName: string; memoryUsedBytes: number; diskBytes: number; hasProblem: boolean; resources: typeof perContainer }
     >();
 
     for (const item of perContainer) {
       const key = item.projectName;
       if (!projectMap.has(key)) {
-        projectMap.set(key, { projectName: key, memoryUsedBytes: 0, diskBytes: 0, resources: [] });
+        projectMap.set(key, { projectName: key, memoryUsedBytes: 0, diskBytes: 0, hasProblem: false, resources: [] });
       }
       const bucket = projectMap.get(key)!;
       bucket.memoryUsedBytes += item.memoryUsedBytes ?? 0;
       bucket.diskBytes += item.diskTotalBytes ?? 0;
+      bucket.hasProblem = bucket.hasProblem || item.problem;
       bucket.resources.push(item);
     }
+
+    const links = await detectProjectLinks(containers);
 
     res.json({
       server: config.serverLabel,
@@ -107,6 +112,7 @@ app.get('/metrics', requireAuth, async (_req, res) => {
           }
         : null,
       projects: Array.from(projectMap.values()).sort((a, b) => b.diskBytes - a.diskBytes),
+      links,
     });
   } catch (err) {
     console.error('[metrics] error building response:', err);
