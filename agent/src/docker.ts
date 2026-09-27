@@ -85,3 +85,39 @@ export async function getLiveContainerStats(containerId: string) {
     cpuPercent,
   };
 }
+
+export interface ContainerActionResult {
+  containerName: string;
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Starts or stops every Coolify-managed container belonging to one project
+ * (matched by the coolify.projectName label). This is how "Pause project" /
+ * "Start project" works from the dashboard - no SSH, just the Docker API
+ * this container already has access to via the mounted socket.
+ */
+export async function setContainersPowerForProject(
+  projectName: string,
+  action: 'start' | 'stop'
+): Promise<ContainerActionResult[]> {
+  const all = await listManagedContainers();
+  const targets = all.filter((c) => (c.projectName ?? '(unlabeled)') === projectName);
+
+  return Promise.all(
+    targets.map(async (c): Promise<ContainerActionResult> => {
+      try {
+        const container = docker.getContainer(c.id);
+        if (action === 'stop') {
+          if (c.state === 'running') await container.stop();
+        } else {
+          if (c.state !== 'running') await container.start();
+        }
+        return { containerName: c.name, ok: true };
+      } catch (err) {
+        return { containerName: c.name, ok: false, error: (err as Error).message };
+      }
+    })
+  );
+}

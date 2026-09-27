@@ -31,6 +31,7 @@ export interface AgentMetricsResponse {
 }
 
 export interface ServerResult {
+  serverId: string;
   configuredName: string;
   ok: boolean;
   error?: string;
@@ -40,4 +41,13 @@ export interface ServerResult {
 export interface ServersApiResponse {
   servers: ServerResult[];
   fetchedAt: string;
+}
+
+export interface ServerConfig {
+  id: string;
+  name: string;
+  url: string;
+  tokenPreview: string;
+  createdAt: string;
+  updatedAt: string;
 }

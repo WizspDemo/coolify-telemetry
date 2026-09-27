@@ -2,10 +2,12 @@ import express, { NextFunction, Request, Response } from 'express';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { config } from './config';
-import { fetchAllServers } from './aggregator';
+import { fetchAllServers, setProjectPower } from './aggregator';
 import { ensureBootstrapUser, verifyCredentials, changePassword, signSession, verifySession } from './auth';
+import { ensureBootstrapServers, listServers, listServersMasked, addServer, updateServer, removeServer, getServer } from './serverStore';
 
 ensureBootstrapUser();
+ensureBootstrapServers();
 
 const app = express();
 app.use(express.json());
@@ -74,8 +76,60 @@ app.post('/api/change-password', requireAuth, (req, res) => {
 });
 
 app.get('/api/servers', requireAuth, async (_req, res) => {
-  const results = await fetchAllServers();
+  const results = await fetchAllServers(listServers());
   res.json({ servers: results, fetchedAt: new Date().toISOString() });
+});
+
+// --- Server management (add/edit/remove Coolify servers, no redeploy needed) ---
+
+app.get('/api/server-configs', requireAuth, (_req, res) => {
+  res.json({ servers: listServersMasked() });
+});
+
+app.post('/api/server-configs', requireAuth, (req, res) => {
+  const { name, url, token } = req.body ?? {};
+  if (typeof name !== 'string' || !name.trim() || typeof url !== 'string' || !url.trim() || typeof token !== 'string' || !token.trim()) {
+    res.status(400).json({ error: 'Χρειάζονται name, url και token.' });
+    return;
+  }
+  const created = addServer(name, url, token);
+  res.status(201).json(created);
+});
+
+app.patch('/api/server-configs/:id', requireAuth, (req, res) => {
+  const { name, url, token } = req.body ?? {};
+  const updated = updateServer(req.params.id, { name, url, token });
+  if (!updated) {
+    res.status(404).json({ error: 'Server not found.' });
+    return;
+  }
+  res.json(updated);
+});
+
+app.delete('/api/server-configs/:id', requireAuth, (req, res) => {
+  const ok = removeServer(req.params.id);
+  if (!ok) {
+    res.status(404).json({ error: 'Server not found.' });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+// --- Pause / start a whole Coolify project (all its containers) ---
+
+app.post('/api/server-configs/:id/projects/:projectName/:action(start|stop)', requireAuth, async (req, res) => {
+  const entry = getServer(req.params.id);
+  if (!entry) {
+    res.status(404).json({ error: 'Server not found.' });
+    return;
+  }
+  const action = req.params.action as 'start' | 'stop';
+  const result = await setProjectPower(entry, req.params.projectName, action);
+  if (!result.ok) {
+    res.status(502).json(result);
+    return;
+  }
+  res.json(result);
 });
 
 // Serve the built React app in production.
@@ -88,5 +142,5 @@ app.get('*', (req, res, next) => {
 
 app.listen(config.port, () => {
   console.log(`[coolify-telemetry-dashboard] listening on port ${config.port}`);
-  console.log(`[coolify-telemetry-dashboard] configured servers: ${config.servers.map((s) => s.name).join(', ') || '(none)'}`);
+  console.log(`[coolify-telemetry-dashboard] configured servers: ${listServers().map((s) => s.name).join(', ') || '(none)'}`);
 });

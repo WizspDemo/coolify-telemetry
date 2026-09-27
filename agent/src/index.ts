@@ -1,6 +1,6 @@
 import express, { NextFunction, Request, Response } from 'express';
 import { config } from './config';
-import { listManagedContainers, getLiveContainerStats } from './docker';
+import { listManagedContainers, getLiveContainerStats, setContainersPowerForProject } from './docker';
 import { getHostCpuPercent, getHostMemory, getHostDisk } from './hostmetrics';
 
 const app = express();
@@ -111,6 +111,30 @@ app.get('/metrics', requireAuth, async (_req, res) => {
   } catch (err) {
     console.error('[metrics] error building response:', err);
     res.status(500).json({ error: 'Failed to collect metrics', details: (err as Error).message });
+  }
+});
+
+/**
+ * Start/stop every container belonging to one Coolify project. Used by the
+ * dashboard's "Pause project" / "Start project" buttons - proxied there,
+ * called directly here against the Docker API this agent already has
+ * access to via the mounted socket.
+ */
+app.post('/projects/:projectName/stop', requireAuth, async (req, res) => {
+  try {
+    const results = await setContainersPowerForProject(req.params.projectName, 'stop');
+    res.json({ ok: true, results });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to stop project', details: (err as Error).message });
+  }
+});
+
+app.post('/projects/:projectName/start', requireAuth, async (req, res) => {
+  try {
+    const results = await setContainersPowerForProject(req.params.projectName, 'start');
+    res.json({ ok: true, results });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to start project', details: (err as Error).message });
   }
 });
 

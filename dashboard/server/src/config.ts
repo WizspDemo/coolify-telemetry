@@ -30,7 +30,10 @@ function parseServers(): ServerEntry[] {
 
 export const config = {
   port: Number(process.env.PORT ?? 8080),
-  servers: parseServers(),
+  // Legacy SERVERS env var - only consulted once, to seed servers.json if
+  // it doesn't exist yet (see serverStore.ensureBootstrapServers). Manage
+  // servers from the UI after that.
+  legacyServers: parseServers(),
   // Directory where users.json (accounts) is persisted. Mount this as a
   // Coolify persistent storage volume so accounts survive redeploys.
   dataDir: process.env.DATA_DIR ?? '/app/data',
