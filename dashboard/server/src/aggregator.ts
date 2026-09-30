@@ -16,6 +16,7 @@ export interface ResourceMetric {
   diskTotalBytes: number | null;
   problem: boolean;
   problemReason: string | null;
+  url: string | null;
 }
 
 export interface ProjectMetric {
@@ -23,6 +24,7 @@ export interface ProjectMetric {
   memoryUsedBytes: number;
   diskBytes: number;
   hasProblem: boolean;
+  url: string | null;
   resources: ResourceMetric[];
 }
 

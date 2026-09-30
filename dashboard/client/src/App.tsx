@@ -497,6 +497,20 @@ function ProjectRow({
       <td style={{ padding: '6px 0' }}>{formatBytes(project.memoryUsedBytes)}</td>
       <td style={{ padding: '6px 0' }}>{formatBytes(project.diskBytes)}</td>
       <td style={{ padding: '6px 0' }}>{project.resources.length}</td>
+      <td style={{ padding: '6px 0' }}>
+        {project.url && (
+          <a
+            href={project.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={{ fontSize: 12 }}
+            title="Άνοιγμα project"
+          >
+            🔗 Open
+          </a>
+        )}
+      </td>
       <td style={{ padding: '6px 0', textAlign: 'right' }}>
         {!allStopped && (
           <button
@@ -586,13 +600,14 @@ function ServerCard({ result, onPowerChanged }: { result: ServersApiResponse['se
                 <th style={{ paddingBottom: 6 }}>RAM</th>
                 <th style={{ paddingBottom: 6 }}>Disk</th>
                 <th style={{ paddingBottom: 6 }}>Resources</th>
+                <th style={{ paddingBottom: 6 }}>Link</th>
                 <th style={{ paddingBottom: 6 }}></th>
               </tr>
             </thead>
             <tbody>
               {data.projects.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="muted" style={{ padding: '8px 0' }}>
+                  <td colSpan={6} className="muted" style={{ padding: '8px 0' }}>
                     Δεν βρέθηκαν Coolify-managed containers.
                   </td>
                 </tr>

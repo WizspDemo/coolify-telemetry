@@ -29,6 +29,52 @@ export interface ManagedContainer {
   problem: boolean;
   /** Human-readable reason when problem is true (e.g. "restarting (crash loop)"). */
   problemReason: string | null;
+  /** Public URL this container/resource is reachable on (Traefik/Caddy label), if any. */
+  url: string | null;
+}
+
+/**
+ * Pulls every public URL a container is reachable on out of its Coolify/
+ * Traefik/Caddy labels. Coolify sets these labels itself when a domain
+ * (custom or the default *.sslip.io one) is attached to a resource, so no
+ * extra config/API calls are needed - we just read what's already there.
+ */
+function extractContainerUrls(labels: Record<string, string>): string[] {
+  const urls = new Set<string>();
+
+  // Caddy-based resources: caddy_0 holds the full "http(s)://domain" value.
+  const caddyValue = labels['caddy_0'];
+  if (caddyValue) {
+    for (const part of caddyValue.split(',')) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      urls.add(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
+    }
+  }
+
+  // Traefik-based resources: one router rule label per domain, e.g.
+  // traefik.http.routers.https-0-<name>.rule = Host(`app.example.com`) && PathPrefix(`/`)
+  for (const [key, value] of Object.entries(labels)) {
+    if (!key.startsWith('traefik.http.routers.') || !key.endsWith('.rule')) continue;
+    const match = value.match(/Host\(`([^`]+)`\)/);
+    if (!match) continue;
+    const scheme = key.includes('.routers.https') ? 'https' : 'http';
+    urls.add(`${scheme}://${match[1]}`);
+  }
+
+  return Array.from(urls);
+}
+
+/**
+ * Picks one "best" URL to represent a resource when it has several (e.g. a
+ * custom domain plus the default sslip.io one, or http+https variants).
+ * Prefers https over http, and a real custom domain over the Coolify
+ * default *.sslip.io one.
+ */
+function pickPrimaryUrl(urls: string[]): string | null {
+  if (urls.length === 0) return null;
+  const rank = (u: string) => (u.includes('.sslip.io') ? 2 : 0) + (u.startsWith('https://') ? 0 : 1);
+  return [...urls].sort((a, b) => rank(a) - rank(b))[0];
 }
 
 /**
@@ -94,6 +140,7 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
       aliasSet.add(name);
 
       const { problem, reason } = computeProblem(c.State, c.Status);
+      const url = pickPrimaryUrl(extractContainerUrls(labels));
 
       return {
         id: c.Id,
@@ -110,6 +157,7 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
         networkAliases: Array.from(aliasSet),
         problem,
         problemReason: reason,
+        url,
       };
     });
 }

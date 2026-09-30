@@ -66,6 +66,7 @@ app.get('/metrics', requireAuth, async (_req, res) => {
           diskTotalBytes: c.sizeRootFsBytes,
           problem: c.problem,
           problemReason: c.problemReason,
+          url: c.url,
         };
       })
     );
@@ -73,18 +74,23 @@ app.get('/metrics', requireAuth, async (_req, res) => {
     // Group per Coolify project
     const projectMap = new Map<
       string,
-      { projectName: string; memoryUsedBytes: number; diskBytes: number; hasProblem: boolean; resources: typeof perContainer }
+      { projectName: string; memoryUsedBytes: number; diskBytes: number; hasProblem: boolean; url: string | null; resources: typeof perContainer }
     >();
 
     for (const item of perContainer) {
       const key = item.projectName;
       if (!projectMap.has(key)) {
-        projectMap.set(key, { projectName: key, memoryUsedBytes: 0, diskBytes: 0, hasProblem: false, resources: [] });
+        projectMap.set(key, { projectName: key, memoryUsedBytes: 0, diskBytes: 0, hasProblem: false, url: null, resources: [] });
       }
       const bucket = projectMap.get(key)!;
       bucket.memoryUsedBytes += item.memoryUsedBytes ?? 0;
       bucket.diskBytes += item.diskTotalBytes ?? 0;
       bucket.hasProblem = bucket.hasProblem || item.problem;
+      // Prefer an "application" resource's URL over a database/service one,
+      // and prefer a custom domain (no url yet, or current pick is sslip.io) over the default one.
+      if (item.url && (!bucket.url || (bucket.url.includes('.sslip.io') && !item.url.includes('.sslip.io')))) {
+        bucket.url = item.url;
+      }
       bucket.resources.push(item);
     }
 
