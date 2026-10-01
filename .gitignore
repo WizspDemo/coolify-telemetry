@@ -7,3 +7,10 @@ tsconfig.tsbuildinfo
 dep_*.json
 dep*.json
 envs.json
+*.json.tmp
+agentapp.json
+agentdeps.json
+dashapp.json
+metrics_check.json
+server2_metrics*.json
+prod1_*.json

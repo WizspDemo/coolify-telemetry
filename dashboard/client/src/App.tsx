@@ -690,9 +690,9 @@ function ServerCard({
             <span>CPU {formatPercent(data.cpu?.percent)}</span>
             <span>RAM {formatPercent(data.memory?.usedPercent)}</span>
             <span>Disk {formatPercent(data.disk?.usedPercent)}</span>
-            {data.missingResources.length > 0 && (
+            {(data.missingResources?.length ?? 0) > 0 && (
               <span style={{ color: 'var(--danger)' }}>
-                ⚠ {data.missingResources.length} εξαφανισμένο{data.missingResources.length > 1 ? 'α' : ''}
+                ⚠ {data.missingResources!.length} εξαφανισμένο{data.missingResources!.length > 1 ? 'α' : ''}
               </span>
             )}
           </div>
@@ -768,13 +768,13 @@ function ServerCard({
             </tbody>
           </table>
 
-          {data.missingResources.length > 0 && (
+          {(data.missingResources?.length ?? 0) > 0 && (
             <>
               <h3 style={{ fontSize: 14, marginTop: 24, marginBottom: 8, color: 'var(--danger)' }}>
                 ⚠ Containers που εξαφανίστηκαν
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {data.missingResources.map((m, i) => (
+                {data.missingResources!.map((m, i) => (
                   <div key={i} style={{ fontSize: 13, color: 'var(--danger)' }}>
                     <strong>{m.projectName}</strong> / {m.resourceName}
                     <span className="muted" style={{ opacity: 0.85 }}>
