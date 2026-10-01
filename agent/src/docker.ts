@@ -31,6 +31,12 @@ export interface ManagedContainer {
   problemReason: string | null;
   /** Public URL this container/resource is reachable on (Traefik/Caddy label), if any. */
   url: string | null;
+  /** How many times Docker has auto-restarted this container (crash/healthcheck driven). */
+  restartCount: number;
+  /** ISO timestamp this container's current process started, or null if it never started. */
+  startedAt: string | null;
+  /** Seconds since startedAt, only set while the container is running. */
+  uptimeSeconds: number | null;
 }
 
 /**
@@ -105,6 +111,83 @@ function computeProblem(state: string, status: string): { problem: boolean; reas
 }
 
 /**
+ * Tracks every (project, resource) pair this agent has ever seen, so we can
+ * notice when one vanishes entirely - not just "exited", but gone from
+ * `docker ps -a` altogether (e.g. an OOM kill that also removed the
+ * container, or a bad deploy that tore it down). This is in-memory only
+ * (per agent process), which is fine: it only needs to span the dashboard's
+ * poll interval to catch a disappearance, not survive agent restarts.
+ */
+interface KnownResource {
+  projectName: string;
+  resourceName: string;
+  lastSeenAt: number;
+}
+
+const knownResources = new Map<string, KnownResource>();
+/** Don't flag a resource as missing until it's been gone this long - a normal
+ * Coolify redeploy recreates the container (briefly absent) and shouldn't trip this. */
+const MISSING_GRACE_MS = 90_000;
+/** Stop tracking a resource entirely after this long absent - assume it was
+ * deliberately removed/deleted in Coolify, not crashed, so it falls off the list. */
+const FORGET_AFTER_MS = 24 * 60 * 60 * 1000;
+
+function resourceKey(projectName: string, resourceName: string): string {
+  return `${projectName}::${resourceName}`;
+}
+
+function trackResourcePresence(containers: ManagedContainer[]): void {
+  const now = Date.now();
+  const presentKeys = new Set<string>();
+  for (const c of containers) {
+    const projectName = c.projectName ?? '(unlabeled)';
+    const resourceName = c.resourceName ?? c.name;
+    const key = resourceKey(projectName, resourceName);
+    presentKeys.add(key);
+    knownResources.set(key, { projectName, resourceName, lastSeenAt: now });
+  }
+  for (const [key, entry] of knownResources) {
+    if (!presentKeys.has(key) && now - entry.lastSeenAt > FORGET_AFTER_MS) {
+      knownResources.delete(key);
+    }
+  }
+}
+
+export interface MissingResource {
+  projectName: string;
+  resourceName: string;
+  lastSeenAt: string;
+  missingForSeconds: number;
+}
+
+/**
+ * Resources that were previously seen but are absent from the current
+ * container list for longer than the grace period - i.e. likely crashed and
+ * got removed rather than just mid-redeploy. Call this right after
+ * `listManagedContainers()` with its result, so presence has already been
+ * recorded for the current poll.
+ */
+export function getMissingResources(currentContainers: ManagedContainer[]): MissingResource[] {
+  const now = Date.now();
+  const presentKeys = new Set(
+    currentContainers.map((c) => resourceKey(c.projectName ?? '(unlabeled)', c.resourceName ?? c.name))
+  );
+  const missing: MissingResource[] = [];
+  for (const [key, entry] of knownResources) {
+    if (presentKeys.has(key)) continue;
+    const missingForMs = now - entry.lastSeenAt;
+    if (missingForMs < MISSING_GRACE_MS) continue;
+    missing.push({
+      projectName: entry.projectName,
+      resourceName: entry.resourceName,
+      lastSeenAt: new Date(entry.lastSeenAt).toISOString(),
+      missingForSeconds: Math.floor(missingForMs / 1000),
+    });
+  }
+  return missing.sort((a, b) => a.missingForSeconds - b.missingForSeconds);
+}
+
+/**
  * Lists every container Coolify manages (label coolify.managed=true) on this
  * server, with the project/environment/resource metadata Coolify attaches as
  * Docker labels, plus per-container disk usage (equivalent to `docker ps -s`).
@@ -115,10 +198,10 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
   // `size: true` makes the Docker API compute SizeRw/SizeRootFs per
   // container - this is what `docker ps -s` uses under the hood.
   const containers = await docker.listContainers({ all: true, size: true });
+  const managed = containers.filter((c) => c.Labels?.['coolify.managed'] === 'true');
 
-  return containers
-    .filter((c) => c.Labels?.['coolify.managed'] === 'true')
-    .map((c) => {
+  const result = await Promise.all(
+    managed.map(async (c) => {
       const labels = c.Labels ?? {};
       const name = (c.Names?.[0] ?? '').replace(/^\//, '');
       let type = 'application';
@@ -142,6 +225,27 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
       const { problem, reason } = computeProblem(c.State, c.Status);
       const url = pickPrimaryUrl(extractContainerUrls(labels));
 
+      // RestartCount/StartedAt aren't in the listContainers summary - need
+      // one inspect call per container to get them. Best-effort: if it fails
+      // (container removed mid-poll), fall back to "unknown" rather than
+      // failing the whole /metrics response.
+      let restartCount = 0;
+      let startedAt: string | null = null;
+      let uptimeSeconds: number | null = null;
+      try {
+        const info = await docker.getContainer(c.Id).inspect();
+        restartCount = info.RestartCount ?? 0;
+        const started = info.State?.StartedAt;
+        if (started && started !== '0001-01-01T00:00:00Z') {
+          startedAt = started;
+          if (info.State?.Running) {
+            uptimeSeconds = Math.max(0, Math.floor((Date.now() - new Date(started).getTime()) / 1000));
+          }
+        }
+      } catch {
+        // container may have stopped/been removed between listing and inspect
+      }
+
       return {
         id: c.Id,
         name,
@@ -158,8 +262,15 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
         problem,
         problemReason: reason,
         url,
+        restartCount,
+        startedAt,
+        uptimeSeconds,
       };
-    });
+    })
+  );
+
+  trackResourcePresence(result);
+  return result;
 }
 
 export interface ProjectLink {
