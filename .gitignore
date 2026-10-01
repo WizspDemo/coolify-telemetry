@@ -6,3 +6,4 @@ client-dist
 tsconfig.tsbuildinfo
 dep_*.json
 dep*.json
+envs.json

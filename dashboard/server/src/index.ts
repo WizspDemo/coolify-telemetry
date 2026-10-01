@@ -83,7 +83,7 @@ app.get('/api/servers', requireAuth, async (_req, res) => {
 
 app.get('/api/history', requireAuth, async (req, res) => {
   const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
-  res.json({ enabled: isHistoryEnabled(), history: await getHistory(hours) });
+  res.json({ enabled: isHistoryEnabled(), history: getHistory(hours) });
 });
 
 // --- Server management (add/edit/remove Coolify servers, no redeploy needed) ---
@@ -149,7 +149,7 @@ app.get('*', (req, res, next) => {
 app.listen(config.port, () => {
   console.log(`[coolify-telemetry-dashboard] listening on port ${config.port}`);
   console.log(`[coolify-telemetry-dashboard] configured servers: ${listServers().map((s) => s.name).join(', ') || '(none)'}`);
-  console.log(`[coolify-telemetry-dashboard] history: ${isHistoryEnabled() ? 'enabled (Postgres)' : 'disabled (set POSTGRES_HOST to enable)'}`);
+  console.log(`[coolify-telemetry-dashboard] history: enabled (local JSON file)`);
 });
 
 // Sample every configured server's server-wide CPU/RAM/Disk into history at
@@ -157,16 +157,11 @@ app.listen(config.port, () => {
 // prune anything older than the retention window once per sampling tick -
 // no separate cron/queue needed for a dataset this small.
 const SAMPLE_INTERVAL_MS = 30_000;
-if (isHistoryEnabled()) {
-  setInterval(async () => {
-    const results = await fetchAllServers(listServers());
-    await Promise.all(
-      results
-        .filter((r) => r.ok && r.data)
-        .map((r) =>
-          recordSample(r.serverId, r.configuredName, r.data!.cpu?.percent ?? null, r.data!.memory?.usedPercent ?? null, r.data!.disk?.usedPercent ?? null)
-        )
-    );
-    await pruneOldSamples(7);
-  }, SAMPLE_INTERVAL_MS);
-}
+setInterval(async () => {
+  const results = await fetchAllServers(listServers());
+  for (const r of results) {
+    if (!r.ok || !r.data) continue;
+    recordSample(r.serverId, r.configuredName, r.data.cpu?.percent ?? null, r.data.memory?.usedPercent ?? null, r.data.disk?.usedPercent ?? null);
+  }
+  pruneOldSamples(7);
+}, SAMPLE_INTERVAL_MS);
