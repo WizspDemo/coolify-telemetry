@@ -18,6 +18,8 @@ export interface ResourceMetric {
   problemReason: string | null;
   url: string | null;
   restartCount: number;
+  startedAt: string | null;
+  uptimeSeconds: number | null;
 }
 
 export interface ProjectMetric {
@@ -27,6 +29,7 @@ export interface ProjectMetric {
   hasProblem: boolean;
   url: string | null;
   check: UrlCheckResult | null;
+  maxRestartCount: number;
   resources: ResourceMetric[];
 }
 
@@ -47,6 +50,13 @@ export interface UrlCheckResult {
   error: string | null;
 }
 
+export interface MissingResource {
+  projectName: string;
+  resourceName: string;
+  lastSeenAt: string;
+  missingForSeconds: number;
+}
+
 export interface AgentMetricsResponse {
   server: string;
   timestamp: string;
@@ -55,6 +65,7 @@ export interface AgentMetricsResponse {
   disk: { mount: string; totalBytes: number; usedBytes: number; availableBytes: number; usedPercent: number } | null;
   projects: ProjectMetric[];
   links: ProjectLink[];
+  missingResources: MissingResource[];
 }
 
 export interface ServerResult {

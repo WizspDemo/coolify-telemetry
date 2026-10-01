@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { ServersApiResponse, ServerConfig, HistorySample } from './types';
-import { formatBytes, formatPercent, percentColor } from './format';
+import { formatBytes, formatPercent, formatDuration, percentColor } from './format';
 import { useTheme } from './useTheme';
 
 const POLL_INTERVAL_MS = 30000;
@@ -503,6 +503,9 @@ function ProjectRow({
   const allRunning = runningCount === project.resources.length && project.resources.length > 0;
   const allStopped = runningCount === 0 && project.resources.length > 0;
   const totalRestarts = project.resources.reduce((sum, r) => sum + (r.restartCount ?? 0), 0);
+  const uptimeSeconds = project.resources
+    .filter((r) => r.state === 'running' && r.uptimeSeconds !== null)
+    .reduce((min, r) => (min === null || r.uptimeSeconds! < min ? r.uptimeSeconds! : min), null as number | null);
 
   const act = async (action: 'start' | 'stop') => {
     setBusy(true);
@@ -558,6 +561,15 @@ function ProjectRow({
       <td style={{ padding: '6px 0' }}>{formatBytes(project.memoryUsedBytes)}</td>
       <td style={{ padding: '6px 0' }}>{formatBytes(project.diskBytes)}</td>
       <td style={{ padding: '6px 0' }}>{project.resources.length}</td>
+      <td style={{ padding: '6px 0' }}>
+        {uptimeSeconds !== null ? formatDuration(uptimeSeconds) : allStopped ? '—' : '—'}
+      </td>
+      <td
+        style={{ padding: '6px 0', color: project.maxRestartCount > 0 ? 'var(--warning)' : undefined }}
+        title={project.maxRestartCount > 0 ? 'Έχει κάνει auto-restart πρόσφατα (crash/healthcheck) - πιθανό σημάδι αστάθειας' : undefined}
+      >
+        {project.maxRestartCount > 0 ? `↻ ${project.maxRestartCount}` : '—'}
+      </td>
       <td style={{ padding: '6px 0' }}>
         {project.url && (
           <a
@@ -617,7 +629,7 @@ function ProjectRow({
     </tr>
     {expanded && (
       <tr style={{ borderTop: '1px dashed var(--border)' }}>
-        <td colSpan={6} style={{ padding: '6px 0 10px 18px' }}>
+        <td colSpan={8} style={{ padding: '6px 0 10px 18px' }}>
           <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
             <thead>
               <tr className="muted" style={{ textAlign: 'left' }}>
@@ -678,6 +690,11 @@ function ServerCard({
             <span>CPU {formatPercent(data.cpu?.percent)}</span>
             <span>RAM {formatPercent(data.memory?.usedPercent)}</span>
             <span>Disk {formatPercent(data.disk?.usedPercent)}</span>
+            {data.missingResources.length > 0 && (
+              <span style={{ color: 'var(--danger)' }}>
+                ⚠ {data.missingResources.length} εξαφανισμένο{data.missingResources.length > 1 ? 'α' : ''}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -731,6 +748,8 @@ function ServerCard({
                 <th style={{ paddingBottom: 6 }}>RAM</th>
                 <th style={{ paddingBottom: 6 }}>Disk</th>
                 <th style={{ paddingBottom: 6 }}>Resources</th>
+                <th style={{ paddingBottom: 6 }}>Uptime</th>
+                <th style={{ paddingBottom: 6 }}>Restarts</th>
                 <th style={{ paddingBottom: 6 }}>Link</th>
                 <th style={{ paddingBottom: 6 }}></th>
               </tr>
@@ -738,7 +757,7 @@ function ServerCard({
             <tbody>
               {data.projects.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="muted" style={{ padding: '8px 0' }}>
+                  <td colSpan={8} className="muted" style={{ padding: '8px 0' }}>
                     Δεν βρέθηκαν Coolify-managed containers.
                   </td>
                 </tr>
@@ -748,6 +767,26 @@ function ServerCard({
               ))}
             </tbody>
           </table>
+
+          {data.missingResources.length > 0 && (
+            <>
+              <h3 style={{ fontSize: 14, marginTop: 24, marginBottom: 8, color: 'var(--danger)' }}>
+                ⚠ Containers που εξαφανίστηκαν
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {data.missingResources.map((m, i) => (
+                  <div key={i} style={{ fontSize: 13, color: 'var(--danger)' }}>
+                    <strong>{m.projectName}</strong> / {m.resourceName}
+                    <span className="muted" style={{ opacity: 0.85 }}>
+                      {' '}
+                      · λείπει εδώ και {formatDuration(m.missingForSeconds)} (τελευταία φορά{' '}
+                      {new Date(m.lastSeenAt).toLocaleString('el-GR')})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
           {data.links.length > 0 && (
             <>

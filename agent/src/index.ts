@@ -1,6 +1,12 @@
 import express, { NextFunction, Request, Response } from 'express';
 import { config } from './config';
-import { listManagedContainers, getLiveContainerStats, setContainersPowerForProject, detectProjectLinks } from './docker';
+import {
+  listManagedContainers,
+  getLiveContainerStats,
+  setContainersPowerForProject,
+  detectProjectLinks,
+  getMissingResources,
+} from './docker';
 import { getHostCpuPercent, getHostMemory, getHostDisk } from './hostmetrics';
 import { checkProjectUrls } from './urlcheck';
 
@@ -69,6 +75,8 @@ app.get('/metrics', requireAuth, async (_req, res) => {
           problemReason: c.problemReason,
           url: c.url,
           restartCount: c.restartCount,
+          startedAt: c.startedAt,
+          uptimeSeconds: c.uptimeSeconds,
         };
       })
     );
@@ -76,18 +84,35 @@ app.get('/metrics', requireAuth, async (_req, res) => {
     // Group per Coolify project
     const projectMap = new Map<
       string,
-      { projectName: string; memoryUsedBytes: number; diskBytes: number; hasProblem: boolean; url: string | null; resources: typeof perContainer }
+      {
+        projectName: string;
+        memoryUsedBytes: number;
+        diskBytes: number;
+        hasProblem: boolean;
+        url: string | null;
+        maxRestartCount: number;
+        resources: typeof perContainer;
+      }
     >();
 
     for (const item of perContainer) {
       const key = item.projectName;
       if (!projectMap.has(key)) {
-        projectMap.set(key, { projectName: key, memoryUsedBytes: 0, diskBytes: 0, hasProblem: false, url: null, resources: [] });
+        projectMap.set(key, {
+          projectName: key,
+          memoryUsedBytes: 0,
+          diskBytes: 0,
+          hasProblem: false,
+          url: null,
+          maxRestartCount: 0,
+          resources: [],
+        });
       }
       const bucket = projectMap.get(key)!;
       bucket.memoryUsedBytes += item.memoryUsedBytes ?? 0;
       bucket.diskBytes += item.diskTotalBytes ?? 0;
       bucket.hasProblem = bucket.hasProblem || item.problem;
+      bucket.maxRestartCount = Math.max(bucket.maxRestartCount, item.restartCount ?? 0);
       // Prefer an "application" resource's URL over a database/service one,
       // and prefer a custom domain (no url yet, or current pick is sslip.io) over the default one.
       if (item.url && (!bucket.url || (bucket.url.includes('.sslip.io') && !item.url.includes('.sslip.io')))) {
@@ -97,6 +122,7 @@ app.get('/metrics', requireAuth, async (_req, res) => {
     }
 
     const links = await detectProjectLinks(containers);
+    const missingResources = getMissingResources(containers);
 
     const projectsArray = Array.from(projectMap.values()).sort((a, b) => b.diskBytes - a.diskBytes);
 
@@ -131,6 +157,7 @@ app.get('/metrics', requireAuth, async (_req, res) => {
         : null,
       projects: projectsWithChecks,
       links,
+      missingResources,
     });
   } catch (err) {
     console.error('[metrics] error building response:', err);
