@@ -2,6 +2,7 @@ import express, { NextFunction, Request, Response } from 'express';
 import { config } from './config';
 import { listManagedContainers, getLiveContainerStats, setContainersPowerForProject, detectProjectLinks } from './docker';
 import { getHostCpuPercent, getHostMemory, getHostDisk } from './hostmetrics';
+import { checkProjectUrls } from './urlcheck';
 
 const app = express();
 app.use(express.json());
@@ -67,6 +68,7 @@ app.get('/metrics', requireAuth, async (_req, res) => {
           problem: c.problem,
           problemReason: c.problemReason,
           url: c.url,
+          restartCount: c.restartCount,
         };
       })
     );
@@ -96,6 +98,16 @@ app.get('/metrics', requireAuth, async (_req, res) => {
 
     const links = await detectProjectLinks(containers);
 
+    const projectsArray = Array.from(projectMap.values()).sort((a, b) => b.diskBytes - a.diskBytes);
+
+    // One lightweight GET per project URL, run in parallel - gives
+    // reachability/latency/TLS-expiry without any extra always-on process.
+    const urlChecks = await checkProjectUrls(projectsArray.map((p) => ({ projectName: p.projectName, url: p.url })));
+    const projectsWithChecks = projectsArray.map((p) => ({
+      ...p,
+      check: urlChecks[p.projectName] ?? null,
+    }));
+
     res.json({
       server: config.serverLabel,
       timestamp: new Date().toISOString(),
@@ -117,7 +129,7 @@ app.get('/metrics', requireAuth, async (_req, res) => {
             usedPercent: disk.usedPercent,
           }
         : null,
-      projects: Array.from(projectMap.values()).sort((a, b) => b.diskBytes - a.diskBytes),
+      projects: projectsWithChecks,
       links,
     });
   } catch (err) {

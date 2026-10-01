@@ -46,4 +46,16 @@ export const config = {
   // per-process otherwise (which logs everyone out on every deploy).
   sessionSecret: process.env.SESSION_SECRET ?? randomBytes(32).toString('hex'),
   sessionTtlSeconds: Number(process.env.SESSION_TTL_SECONDS ?? 60 * 60 * 24 * 7), // 7 days
+  // Optional: connection details for an EXISTING Postgres instance (e.g. the
+  // self-hosted Supabase stack already running on the same Coolify server)
+  // used only to store small CPU/RAM/Disk history rows for sparklines.
+  // Leave POSTGRES_HOST unset to disable history entirely - nothing else
+  // depends on it.
+  postgres: {
+    host: process.env.POSTGRES_HOST ?? '',
+    port: Number(process.env.POSTGRES_PORT ?? 5432),
+    database: process.env.POSTGRES_DB ?? 'postgres',
+    user: process.env.POSTGRES_USER ?? 'postgres',
+    password: process.env.POSTGRES_PASSWORD ?? '',
+  },
 };

@@ -31,6 +31,8 @@ export interface ManagedContainer {
   problemReason: string | null;
   /** Public URL this container/resource is reachable on (Traefik/Caddy label), if any. */
   url: string | null;
+  /** How many times Docker has restarted this container (crash-loop signal even outside a 'restarting' state right now). */
+  restartCount: number;
 }
 
 /**
@@ -116,7 +118,7 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
   // container - this is what `docker ps -s` uses under the hood.
   const containers = await docker.listContainers({ all: true, size: true });
 
-  return containers
+  const managed = containers
     .filter((c) => c.Labels?.['coolify.managed'] === 'true')
     .map((c) => {
       const labels = c.Labels ?? {};
@@ -158,8 +160,23 @@ export async function listManagedContainers(): Promise<ManagedContainer[]> {
         problem,
         problemReason: reason,
         url,
+        restartCount: 0,
       };
     });
+
+  // RestartCount isn't part of the `docker ps` listing payload, only a full
+  // `inspect` has it - one extra cheap local-socket call per container so
+  // the dashboard can flag "this looks fine right now but keeps bouncing".
+  return Promise.all(
+    managed.map(async (c) => {
+      try {
+        const info = await docker.getContainer(c.id).inspect();
+        return { ...c, restartCount: info.RestartCount ?? 0 };
+      } catch {
+        return c;
+      }
+    })
+  );
 }
 
 export interface ProjectLink {

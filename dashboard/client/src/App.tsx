@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import type { ServersApiResponse, ServerConfig } from './types';
+import type { ServersApiResponse, ServerConfig, HistorySample } from './types';
 import { formatBytes, formatPercent, percentColor } from './format';
 import { useTheme } from './useTheme';
 
@@ -420,6 +420,56 @@ function useServers() {
   return { data, error, loading, reload: load };
 }
 
+function useHistory() {
+  const [history, setHistory] = useState<Record<string, HistorySample[]>>({});
+  const [enabled, setEnabled] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/history?hours=24');
+      if (!res.ok) return;
+      const json = await res.json();
+      setEnabled(Boolean(json.enabled));
+      setHistory(json.history ?? {});
+    } catch {
+      // history is a nice-to-have - fail silently, dashboard keeps working
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [load]);
+
+  return { history, enabled };
+}
+
+/** Tiny inline SVG sparkline - no charting library needed for ~24h of 30s samples. */
+function Sparkline({ samples, field, color }: { samples: HistorySample[]; field: keyof Omit<HistorySample, 'recordedAt'>; color: string }) {
+  const values = samples.map((s) => s[field]).filter((v): v is number => v !== null);
+  if (values.length < 2) {
+    return <span className="muted" style={{ fontSize: 11 }}>όχι αρκετά δεδομένα ακόμα</span>;
+  }
+  const width = 160;
+  const height = 28;
+  const max = Math.max(100, ...values);
+  const min = 0;
+  const points = values
+    .map((v, i) => {
+      const x = (i / (values.length - 1)) * width;
+      const y = height - ((v - min) / (max - min)) * height;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  return (
+    <svg width={width} height={height} style={{ display: 'block' }}>
+      <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} />
+    </svg>
+  );
+}
+
 function Bar({ percent }: { percent: number | null }) {
   const pct = percent ?? 0;
   return (
@@ -447,10 +497,12 @@ function ProjectRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const runningCount = project.resources.filter((r) => r.state === 'running').length;
   const allRunning = runningCount === project.resources.length && project.resources.length > 0;
   const allStopped = runningCount === 0 && project.resources.length > 0;
+  const totalRestarts = project.resources.reduce((sum, r) => sum + (r.restartCount ?? 0), 0);
 
   const act = async (action: 'start' | 'stop') => {
     setBusy(true);
@@ -474,13 +526,17 @@ function ProjectRow({
   };
 
   return (
+    <>
     <tr
       style={{
         borderTop: '1px solid var(--border)',
         color: project.hasProblem ? 'var(--danger)' : allStopped ? 'var(--warning)' : undefined,
       }}
     >
-      <td style={{ padding: '6px 0' }}>
+      <td style={{ padding: '6px 0', cursor: 'pointer' }} onClick={() => setExpanded((v) => !v)}>
+        <span style={{ fontSize: 10, marginRight: 4, display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s ease' }}>
+          ▶
+        </span>
         {project.projectName}
         {project.hasProblem && (
           <span style={{ fontSize: 11, marginLeft: 6 }} title={project.resources.find((r) => r.problem)?.problemReason ?? undefined}>
@@ -488,6 +544,11 @@ function ProjectRow({
           </span>
         )}
         {!project.hasProblem && allStopped && <span style={{ fontSize: 11, marginLeft: 6 }}>⏸ paused</span>}
+        {totalRestarts > 0 && (
+          <span className="muted" style={{ fontSize: 11, marginLeft: 6 }} title="Σύνολο restarts των containers του project">
+            ↻ {totalRestarts}
+          </span>
+        )}
         {actionError && (
           <div className="error-text" style={{ fontSize: 11 }}>
             {actionError}
@@ -509,6 +570,22 @@ function ProjectRow({
           >
             🔗 Open
           </a>
+        )}
+        {project.check && (
+          <span
+            className={project.check.reachable ? 'muted' : 'error-text'}
+            style={{ fontSize: 11, marginLeft: 8 }}
+            title={
+              project.check.error
+                ? `Σφάλμα: ${project.check.error}`
+                : `HTTP ${project.check.statusCode}${project.check.tlsDaysRemaining !== null ? ` · TLS λήγει σε ${project.check.tlsDaysRemaining} ημέρες` : ''}`
+            }
+          >
+            {project.check.reachable ? `${project.check.latencyMs}ms` : '✕ down'}
+            {project.check.tlsDaysRemaining !== null && project.check.tlsDaysRemaining <= 14 && (
+              <span style={{ color: 'var(--warning)' }}> · 🔒 {project.check.tlsDaysRemaining}d</span>
+            )}
+          </span>
         )}
       </td>
       <td style={{ padding: '6px 0', textAlign: 'right' }}>
@@ -538,10 +615,47 @@ function ProjectRow({
         )}
       </td>
     </tr>
+    {expanded && (
+      <tr style={{ borderTop: '1px dashed var(--border)' }}>
+        <td colSpan={6} style={{ padding: '6px 0 10px 18px' }}>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr className="muted" style={{ textAlign: 'left' }}>
+                <th style={{ paddingBottom: 4, fontWeight: 400 }}>Resource</th>
+                <th style={{ paddingBottom: 4, fontWeight: 400 }}>Image</th>
+                <th style={{ paddingBottom: 4, fontWeight: 400 }}>Status</th>
+                <th style={{ paddingBottom: 4, fontWeight: 400 }}>Restarts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {project.resources.map((r) => (
+                <tr key={r.containerName} style={{ color: r.problem ? 'var(--danger)' : undefined }}>
+                  <td style={{ padding: '2px 0' }}>{r.resourceName ?? r.containerName}</td>
+                  <td className="muted" style={{ padding: '2px 0' }}>{r.image}</td>
+                  <td style={{ padding: '2px 0' }}>{r.status}</td>
+                  <td style={{ padding: '2px 0' }}>{r.restartCount > 0 ? `↻ ${r.restartCount}` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </td>
+      </tr>
+    )}
+    </>
   );
 }
 
-function ServerCard({ result, onPowerChanged }: { result: ServersApiResponse['servers'][number]; onPowerChanged: () => void }) {
+function ServerCard({
+  result,
+  onPowerChanged,
+  history,
+  historyEnabled,
+}: {
+  result: ServersApiResponse['servers'][number];
+  onPowerChanged: () => void;
+  history: HistorySample[];
+  historyEnabled: boolean;
+}) {
   const { serverId, configuredName, ok, error, data } = result;
   const [expanded, setExpanded] = useState(false);
 
@@ -589,6 +703,23 @@ function ServerCard({ result, onPowerChanged }: { result: ServersApiResponse['se
               percent={data.disk?.usedPercent ?? null}
             />
           </div>
+
+          {historyEnabled && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginTop: 16 }}>
+              <div>
+                <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>CPU (24ω)</div>
+                <Sparkline samples={history} field="cpuPercent" color="#f5a623" />
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>RAM (24ω)</div>
+                <Sparkline samples={history} field="memoryUsedPercent" color="#5b8def" />
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 11, marginBottom: 2 }}>Disk (24ω)</div>
+                <Sparkline samples={history} field="diskUsedPercent" color="#30a46c" />
+              </div>
+            </div>
+          )}
 
           <h3 className="muted" style={{ fontSize: 14, marginTop: 24, marginBottom: 8 }}>
             Projects
@@ -654,6 +785,7 @@ function Metric({ label, value, percent }: { label: string; value: string; perce
 
 function Dashboard({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const { data, error, loading, reload } = useServers();
+  const { history, enabled: historyEnabled } = useHistory();
   const { theme, toggle } = useTheme();
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showServerManager, setShowServerManager] = useState(false);
@@ -705,7 +837,13 @@ function Dashboard({ me, onLogout }: { me: Me; onLogout: () => void }) {
           </p>
           <div style={{ display: 'grid', gap: 20 }}>
             {data.servers.map((s) => (
-              <ServerCard key={s.serverId} result={s} onPowerChanged={onPowerChanged} />
+              <ServerCard
+                key={s.serverId}
+                result={s}
+                onPowerChanged={onPowerChanged}
+                history={history[s.serverId] ?? []}
+                historyEnabled={historyEnabled}
+              />
             ))}
             {data.servers.length === 0 && (
               <p className="muted">

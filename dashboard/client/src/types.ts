@@ -15,6 +15,7 @@ export interface ResourceMetric {
   problem: boolean;
   problemReason: string | null;
   url: string | null;
+  restartCount: number;
 }
 
 export interface ProjectMetric {
@@ -23,6 +24,7 @@ export interface ProjectMetric {
   diskBytes: number;
   hasProblem: boolean;
   url: string | null;
+  check: UrlCheckResult | null;
   resources: ResourceMetric[];
 }
 
@@ -32,6 +34,15 @@ export interface ProjectLink {
   toProject: string;
   toContainer: string;
   viaHostname: string;
+}
+
+export interface UrlCheckResult {
+  reachable: boolean;
+  statusCode: number | null;
+  latencyMs: number | null;
+  tlsExpiresAt: string | null;
+  tlsDaysRemaining: number | null;
+  error: string | null;
 }
 
 export interface AgentMetricsResponse {
@@ -64,4 +75,16 @@ export interface ServerConfig {
   tokenPreview: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface HistorySample {
+  recordedAt: string;
+  cpuPercent: number | null;
+  memoryUsedPercent: number | null;
+  diskUsedPercent: number | null;
+}
+
+export interface HistoryApiResponse {
+  enabled: boolean;
+  history: Record<string, HistorySample[]>;
 }
