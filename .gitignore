@@ -4,3 +4,4 @@ client-dist
 .env
 *.log
 tsconfig.tsbuildinfo
+dep_*.json
