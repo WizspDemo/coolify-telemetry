@@ -5,3 +5,4 @@ client-dist
 *.log
 tsconfig.tsbuildinfo
 dep_*.json
+dep*.json
