@@ -1,5 +1,13 @@
 import { Pool } from 'pg';
+import dns from 'dns';
 import { config } from './config';
+
+// Alpine's musl libc + Docker's embedded DNS (127.0.0.11) can resolve a
+// Docker-network hostname's AAAA record first and time out before falling
+// back to IPv4, surfacing as a flaky "getaddrinfo EAI_AGAIN" even though the
+// host resolves fine moments later. Force IPv4-first resolution so pg's
+// connections don't hit that race.
+dns.setDefaultResultOrder('ipv4first');
 
 /**
  * 24h-ish CPU/RAM/Disk history per server, for sparklines on the dashboard.
