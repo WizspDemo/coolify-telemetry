@@ -74,6 +74,30 @@ async function ensureSchema(): Promise<void> {
   return schemaReady;
 }
 
+/**
+ * Alpine/musl's DNS resolver can return EAI_AGAIN/ENOTFOUND under even mild
+ * concurrent lookup pressure (a known musl quirk, not a real connectivity
+ * problem - docs: https://github.com/nodejs/node/issues/12562) even though a
+ * single isolated lookup for the same hostname succeeds immediately. Retry
+ * transient resolution failures a couple of times with a short delay before
+ * giving up, instead of failing the whole sample/prune/read on one flaky
+ * lookup.
+ */
+async function withDnsRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EAI_AGAIN' && code !== 'ENOTFOUND') throw err;
+      await new Promise((resolve) => setTimeout(resolve, 250 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 export async function recordSample(
   serverId: string,
   serverName: string,
@@ -83,12 +107,14 @@ export async function recordSample(
 ): Promise<void> {
   if (!isHistoryEnabled()) return;
   try {
-    await ensureSchema();
-    await getPool().query(
-      `INSERT INTO telemetry_history (server_id, server_name, cpu_percent, memory_used_percent, disk_used_percent)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [serverId, serverName, cpuPercent, memoryUsedPercent, diskUsedPercent]
-    );
+    await withDnsRetry(async () => {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO telemetry_history (server_id, server_name, cpu_percent, memory_used_percent, disk_used_percent)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [serverId, serverName, cpuPercent, memoryUsedPercent, diskUsedPercent]
+      );
+    });
   } catch (err) {
     console.error('[history] failed to record sample:', (err as Error).message);
   }
@@ -98,8 +124,10 @@ export async function recordSample(
 export async function pruneOldSamples(retentionDays = 7): Promise<void> {
   if (!isHistoryEnabled()) return;
   try {
-    await ensureSchema();
-    await getPool().query(`DELETE FROM telemetry_history WHERE recorded_at < now() - ($1 || ' days')::interval`, [retentionDays]);
+    await withDnsRetry(async () => {
+      await ensureSchema();
+      await getPool().query(`DELETE FROM telemetry_history WHERE recorded_at < now() - ($1 || ' days')::interval`, [retentionDays]);
+    });
   } catch (err) {
     console.error('[history] failed to prune old samples:', (err as Error).message);
   }
@@ -109,20 +137,23 @@ export async function pruneOldSamples(retentionDays = 7): Promise<void> {
 export async function getHistory(hours = 24): Promise<Record<string, HistorySample[]>> {
   if (!isHistoryEnabled()) return {};
   try {
-    await ensureSchema();
-    const { rows } = await getPool().query<{
-      server_id: string;
-      recorded_at: Date;
-      cpu_percent: number | null;
-      memory_used_percent: number | null;
-      disk_used_percent: number | null;
-    }>(
-      `SELECT server_id, recorded_at, cpu_percent, memory_used_percent, disk_used_percent
-       FROM telemetry_history
-       WHERE recorded_at > now() - ($1 || ' hours')::interval
-       ORDER BY recorded_at ASC`,
-      [hours]
-    );
+    const rows = await withDnsRetry(async () => {
+      await ensureSchema();
+      const result = await getPool().query<{
+        server_id: string;
+        recorded_at: Date;
+        cpu_percent: number | null;
+        memory_used_percent: number | null;
+        disk_used_percent: number | null;
+      }>(
+        `SELECT server_id, recorded_at, cpu_percent, memory_used_percent, disk_used_percent
+         FROM telemetry_history
+         WHERE recorded_at > now() - ($1 || ' hours')::interval
+         ORDER BY recorded_at ASC`,
+        [hours]
+      );
+      return result.rows;
+    });
 
     const grouped: Record<string, HistorySample[]> = {};
     for (const row of rows) {
