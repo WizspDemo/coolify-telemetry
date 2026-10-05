@@ -41,6 +41,11 @@ export const config = {
   // yet. After that, log in and use the UI's "change password" instead.
   adminUsername: process.env.ADMIN_USERNAME ?? '',
   adminPassword: process.env.ADMIN_PASSWORD ?? '',
+  // Read-only API key for external integrations (e.g. a Rainmeter desktop
+  // skin) that just want CPU/RAM/Disk per server, without a login session.
+  // Set PUBLIC_API_KEY in the Coolify app's env vars; leave unset to disable
+  // the /api/public/summary endpoint entirely (it 404s with no key configured).
+  publicApiKey: process.env.PUBLIC_API_KEY ?? '',
   // Secret used to sign session tokens (HMAC). Set this explicitly in
   // production so sessions survive a redeploy; a random one is generated
   // per-process otherwise (which logs everyone out on every deploy).

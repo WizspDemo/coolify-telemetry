@@ -1,6 +1,7 @@
 import express, { NextFunction, Request, Response } from 'express';
 import cookieParser from 'cookie-parser';
 import path from 'path';
+import { timingSafeEqual } from 'crypto';
 import { config } from './config';
 import { fetchAllServers, setProjectPower } from './aggregator';
 import { ensureBootstrapUser, verifyCredentials, changePassword, signSession, verifySession } from './auth';
@@ -84,6 +85,44 @@ app.get('/api/servers', requireAuth, async (_req, res) => {
 app.get('/api/history', requireAuth, async (req, res) => {
   const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
   res.json({ enabled: isHistoryEnabled(), history: await getHistory(hours) });
+});
+
+// --- Read-only public summary, for external tools (Rainmeter skin, etc.) ---
+// Auth: ?key=... query param or X-Api-Key header, checked against
+// PUBLIC_API_KEY (see config.ts). No cookie/session involved, and the key
+// is never logged. Returns just CPU/RAM/Disk per server - nothing sensitive
+// (no tokens, no project/container detail).
+function checkPublicApiKey(req: Request): boolean {
+  if (!config.publicApiKey) return false;
+  const provided = (req.header('x-api-key') || (req.query.key as string) || '').trim();
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(config.publicApiKey);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+app.get('/api/public/summary', async (req, res) => {
+  if (!checkPublicApiKey(req)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const results = await fetchAllServers(listServers());
+  res.json({
+    fetchedAt: new Date().toISOString(),
+    servers: results.map((r) => ({
+      name: r.configuredName,
+      ok: r.ok,
+      error: r.error ?? null,
+      cpuPercent: r.data?.cpu?.percent ?? null,
+      memoryUsedPercent: r.data?.memory?.usedPercent ?? null,
+      memoryUsedBytes: r.data?.memory?.usedBytes ?? null,
+      memoryTotalBytes: r.data?.memory?.totalBytes ?? null,
+      diskUsedPercent: r.data?.disk?.usedPercent ?? null,
+      diskUsedBytes: r.data?.disk?.usedBytes ?? null,
+      diskTotalBytes: r.data?.disk?.totalBytes ?? null,
+    })),
+  });
 });
 
 // --- Server management (add/edit/remove Coolify servers, no redeploy needed) ---
