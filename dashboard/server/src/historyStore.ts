@@ -1,14 +1,20 @@
-import { Pool } from 'pg';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import path from 'path';
 import { config } from './config';
 
 /**
  * 24h-ish CPU/RAM/Disk history per server, for sparklines on the dashboard.
- * Stored in the Postgres instance the user already runs on the same
- * Coolify server (a self-hosted Supabase stack) instead of spinning up a
- * dedicated DB container or an unbounded in-memory array - the dashboard
- * container joins that Postgres's Docker network (see README) and talks to
- * it directly. If POSTGRES_HOST isn't set, history is silently disabled -
- * every other feature keeps working.
+ * Stored as a single JSON file on the same persistent volume users.json
+ * already lives on - fully self-contained: no external database, no extra
+ * container, no native build dependency, no Docker network dependency on
+ * anything else running on the server. (An earlier version of this reused
+ * an existing self-hosted Supabase Postgres instance on the same server -
+ * deliberately dropped: that coupled the dashboard's uptime/removability to
+ * Supabase's. A real DB (SQLite via better-sqlite3) was also tried and
+ * dropped - it needs native compilation, which fails on this project's
+ * plain `node:20-alpine` Dockerfile without adding build-essential/python
+ * to the image. At one sample per server per 30s, 7 days of retention is at
+ * most a few thousand rows - trivial as plain JSON, no DB needed.)
  */
 
 export interface HistorySample {
@@ -18,113 +24,92 @@ export interface HistorySample {
   diskUsedPercent: number | null;
 }
 
-let pool: Pool | null = null;
-let schemaReady: Promise<void> | null = null;
+interface StoredSample extends HistorySample {
+  serverId: string;
+  serverName: string;
+}
 
+interface HistoryFile {
+  samples: StoredSample[];
+}
+
+const historyFilePath = path.join(config.dataDir, 'history.json');
+
+function loadFile(): HistoryFile {
+  if (!existsSync(historyFilePath)) return { samples: [] };
+  try {
+    const parsed = JSON.parse(readFileSync(historyFilePath, 'utf8')) as HistoryFile;
+    if (!Array.isArray(parsed.samples)) return { samples: [] };
+    return parsed;
+  } catch (err) {
+    console.error('[history] failed to read history.json, starting empty:', (err as Error).message);
+    return { samples: [] };
+  }
+}
+
+function saveFile(data: HistoryFile) {
+  writeFileSync(historyFilePath, JSON.stringify(data), 'utf8');
+}
+
+/** History is always available - it's a local file, nothing to misconfigure or fail to reach. */
 export function isHistoryEnabled(): boolean {
-  return Boolean(config.postgres.host);
+  return true;
 }
 
-function getPool(): Pool {
-  if (!pool) {
-    pool = new Pool({
-      host: config.postgres.host,
-      port: config.postgres.port,
-      database: config.postgres.database,
-      user: config.postgres.user,
-      password: config.postgres.password,
-      // Small pool - this is a handful of writes/reads per minute, not a
-      // real app workload.
-      max: 3,
-      idleTimeoutMillis: 30_000,
-    });
-    pool.on('error', (err) => {
-      console.error('[history] idle Postgres client error:', err.message);
-    });
-  }
-  return pool;
-}
-
-async function ensureSchema(): Promise<void> {
-  if (!schemaReady) {
-    schemaReady = getPool()
-      .query(
-        `CREATE TABLE IF NOT EXISTS telemetry_history (
-           id BIGSERIAL PRIMARY KEY,
-           server_id TEXT NOT NULL,
-           server_name TEXT NOT NULL,
-           cpu_percent REAL,
-           memory_used_percent REAL,
-           disk_used_percent REAL,
-           recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
-         );
-         CREATE INDEX IF NOT EXISTS telemetry_history_server_time_idx
-           ON telemetry_history (server_id, recorded_at DESC);`
-      )
-      .then(() => undefined);
-  }
-  return schemaReady;
-}
-
-export async function recordSample(
+export function recordSample(
   serverId: string,
   serverName: string,
   cpuPercent: number | null,
   memoryUsedPercent: number | null,
   diskUsedPercent: number | null
-): Promise<void> {
-  if (!isHistoryEnabled()) return;
+): void {
   try {
-    await ensureSchema();
-    await getPool().query(
-      `INSERT INTO telemetry_history (server_id, server_name, cpu_percent, memory_used_percent, disk_used_percent)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [serverId, serverName, cpuPercent, memoryUsedPercent, diskUsedPercent]
-    );
+    const data = loadFile();
+    data.samples.push({
+      serverId,
+      serverName,
+      recordedAt: new Date().toISOString(),
+      cpuPercent,
+      memoryUsedPercent,
+      diskUsedPercent,
+    });
+    saveFile(data);
   } catch (err) {
     console.error('[history] failed to record sample:', (err as Error).message);
   }
 }
 
 /** Deletes samples older than the retention window. Call this occasionally (e.g. once per sampling tick), not per-request. */
-export async function pruneOldSamples(retentionDays = 7): Promise<void> {
-  if (!isHistoryEnabled()) return;
+export function pruneOldSamples(retentionDays = 7): void {
   try {
-    await ensureSchema();
-    await getPool().query(`DELETE FROM telemetry_history WHERE recorded_at < now() - ($1 || ' days')::interval`, [retentionDays]);
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    const data = loadFile();
+    const before = data.samples.length;
+    data.samples = data.samples.filter((s) => new Date(s.recordedAt).getTime() >= cutoff);
+    if (data.samples.length !== before) saveFile(data);
   } catch (err) {
     console.error('[history] failed to prune old samples:', (err as Error).message);
   }
 }
 
 /** Returns the last `hours` of samples, oldest first, grouped by server_id. */
-export async function getHistory(hours = 24): Promise<Record<string, HistorySample[]>> {
-  if (!isHistoryEnabled()) return {};
+export function getHistory(hours = 24): Record<string, HistorySample[]> {
   try {
-    await ensureSchema();
-    const { rows } = await getPool().query<{
-      server_id: string;
-      recorded_at: Date;
-      cpu_percent: number | null;
-      memory_used_percent: number | null;
-      disk_used_percent: number | null;
-    }>(
-      `SELECT server_id, recorded_at, cpu_percent, memory_used_percent, disk_used_percent
-       FROM telemetry_history
-       WHERE recorded_at > now() - ($1 || ' hours')::interval
-       ORDER BY recorded_at ASC`,
-      [hours]
-    );
-
+    const cutoff = Date.now() - hours * 60 * 60 * 1000;
+    const data = loadFile();
     const grouped: Record<string, HistorySample[]> = {};
-    for (const row of rows) {
-      if (!grouped[row.server_id]) grouped[row.server_id] = [];
-      grouped[row.server_id].push({
-        recordedAt: row.recorded_at.toISOString(),
-        cpuPercent: row.cpu_percent,
-        memoryUsedPercent: row.memory_used_percent,
-        diskUsedPercent: row.disk_used_percent,
+    for (const s of data.samples) {
+      if (new Date(s.recordedAt).getTime() < cutoff) continue;
+      if (!grouped[s.serverId]) grouped[s.serverId] = [];
+      grouped[s.serverId].push({
+        recordedAt: s.recordedAt,
+        cpuPercent: s.cpuPercent,
+        memoryUsedPercent: s.memoryUsedPercent,
+        diskUsedPercent: s.diskUsedPercent,
       });
+    }
+    for (const key of Object.keys(grouped)) {
+      grouped[key].sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
     }
     return grouped;
   } catch (err) {
